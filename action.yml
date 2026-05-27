@@ -26,6 +26,15 @@ inputs:
       GitHub App ID for git identity email. Used together with app-slug.
     required: false
     default: ""
+  wiki-push:
+    description: >
+      When true (default) and a wiki token is provided, push wiki changes
+      back during post-run cleanup. Set false when the caller pushes the
+      wiki itself — e.g. a long-running job that mints a fresh token after
+      the start-of-job token has expired (App installation tokens last only
+      one hour).
+    required: false
+    default: "true"
   bun-version:
     description: Bun version to install.
     required: false
@@ -138,7 +147,7 @@ runs:
       run: ./scripts/bootstrap.sh
 
     - name: Push wiki changes
-      if: inputs.token != ''
+      if: inputs.token != '' && inputs.wiki-push == 'true'
       uses: forwardimpact/fit-bootstrap/post-run@v1
       with:
         command: just wiki-push
