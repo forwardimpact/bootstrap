@@ -2,8 +2,8 @@
 
 Opinionated FIT environment bootstrap for GitHub Actions. Sets up Bun,
 installs and caches CLI dependencies (`just`, `apm`, `gh`), restores the
-`node_modules` + `generated` workspace cache, optionally syncs the wiki,
-and runs `./scripts/bootstrap.sh`.
+`node_modules` + `generated` workspace cache, optionally checks out the
+wiki, and runs `./scripts/bootstrap.sh`.
 
 Single source of truth for the FIT CI environment. The monorepo's local
 `bootstrap` action and every FIT sibling action (e.g. `kata-agent`) call
@@ -15,7 +15,7 @@ this one — version-pinned at `@v1` — so they never drift.
 - uses: actions/checkout@v4
 - uses: forwardimpact/fit-bootstrap@v1
   with:
-    token: ${{ steps.ci-app.outputs.token }}   # optional, enables wiki sync
+    token: ${{ steps.ci-app.outputs.token }}   # optional, enables wiki checkout
     app-slug: kata-agent-team                   # optional, sets git identity
     app-id: ${{ secrets.KATA_APP_ID }}          # optional, sets git identity
 ```
@@ -32,13 +32,14 @@ The consumer repo must follow FIT conventions:
   Receives `BOOTSTRAP_WORKSPACE_CACHE_HIT={true|false}` so it can skip
   expensive setup on a warm cache.
 - `bun.lock` — workspace cache key includes its hash.
-- `justfile` exposing `wiki-push` recipe (only if `token:` is provided).
+- a `scripts/bootstrap.sh` that handles wiki init/pull (only if `token:`
+  is provided).
 
 ## Inputs
 
 | Input         | Required | Default    | Description                                                                              |
 | ------------- | -------- | ---------- | ---------------------------------------------------------------------------------------- |
-| `token`       | No       | `""`       | GitHub token with write access to the wiki. When provided, the wiki is checked out into `./wiki` and pushed back during post-run cleanup. |
+| `token`       | No       | `""`       | GitHub token with read access to the wiki. When provided, the wiki is checked out into `./wiki`. Pushing back is the caller's job — see [`forwardimpact/fit-wiki@v1`](https://github.com/forwardimpact/fit-wiki). |
 | `app-slug`    | No       | `""`       | GitHub App slug for git identity (e.g. `kata-agent-team`).                              |
 | `app-id`      | No       | `""`       | GitHub App ID for the git identity email.                                                |
 | `bun-version` | No       | `"1.3.11"` | Bun version to install.                                                                  |
@@ -70,15 +71,15 @@ paths (symlinks don't survive `actions/cache` extraction), so
 `scripts/bootstrap.sh` always runs `just codegen` on warm cache to
 recreate them.
 
-## Wiki sync
+## Wiki
 
-When `token` is provided:
+When `token` is provided, the wiki is checked out into `./wiki` before
+`scripts/bootstrap.sh` runs, so agents can read and write agent memory
+during the job. When `token` is empty, the checkout is skipped — the
+action is safe to use in jobs that don't need the wiki (e.g. pure CI
+checks).
 
-- The wiki is checked out into `./wiki` before `scripts/bootstrap.sh`
-  runs.
-- A `post-run` node20 step is registered that runs `just wiki-push`
-  during job cleanup, so any wiki edits made during the job are pushed
-  back automatically.
-
-When `token` is empty, both steps are skipped — the action is safe to
-use in jobs that don't need the wiki (e.g. pure CI checks).
+Pushing the wiki back is **not** this action's job. The token minted at
+job start expires after one hour, so a cleanup-time push fails on long
+agent runs. Push with [`forwardimpact/fit-wiki@v1`](https://github.com/forwardimpact/fit-wiki)
+as an `always()` step after the agent — it mints a fresh token first.

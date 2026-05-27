@@ -3,15 +3,16 @@ description: >
   Opinionated FIT environment bootstrap. Sets up Bun, installs cached CLI
   dependencies (just / apm / gh) into ~/.local/bin, restores the
   node_modules + generated workspace cache, optionally checks out the
-  GitHub wiki, and runs ./scripts/bootstrap.sh. Pair with the wiki post-run
-  step when you need the wiki pushed back during job cleanup.
+  GitHub wiki, and runs ./scripts/bootstrap.sh. To push the wiki back, run
+  forwardimpact/fit-wiki@v1 after the agent step.
 
 inputs:
   token:
     description: >
-      GitHub token with write access to the wiki. When provided, the wiki
-      is checked out into ./wiki and pushed back during post-run cleanup.
-      Leave blank to skip wiki sync entirely.
+      GitHub token with read access to the wiki. When provided, the wiki is
+      checked out into ./wiki. Leave blank to skip wiki checkout entirely.
+      Pushing the wiki back is the caller's responsibility — see
+      forwardimpact/fit-wiki@v1.
     required: false
     default: ""
   app-slug:
@@ -26,15 +27,6 @@ inputs:
       GitHub App ID for git identity email. Used together with app-slug.
     required: false
     default: ""
-  wiki-push:
-    description: >
-      When true (default) and a wiki token is provided, push wiki changes
-      back during post-run cleanup. Set false when the caller pushes the
-      wiki itself — e.g. a long-running job that mints a fresh token after
-      the start-of-job token has expired (App installation tokens last only
-      one hour).
-    required: false
-    default: "true"
   bun-version:
     description: Bun version to install.
     required: false
@@ -145,9 +137,3 @@ runs:
         GH_TOKEN: ${{ inputs.token }}
         BOOTSTRAP_WORKSPACE_CACHE_HIT: ${{ steps.workspace-cache.outputs.cache-hit }}
       run: ./scripts/bootstrap.sh
-
-    - name: Push wiki changes
-      if: inputs.token != '' && inputs.wiki-push == 'true'
-      uses: forwardimpact/fit-bootstrap/post-run@v1
-      with:
-        command: just wiki-push
