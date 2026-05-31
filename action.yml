@@ -91,19 +91,40 @@ runs:
         path: wiki
         token: ${{ inputs.token }}
 
+    # Ask the consumer's install-deps.sh which paths it manages, rather than
+    # caching the whole install prefix. The script is the source of truth for
+    # what it installs, so it is also the source of truth for what to cache.
+    # Layout is static, so this prints the right paths even on a cold cache
+    # before anything is installed.
+    - name: Resolve deps cache paths
+      id: deps-paths
+      shell: bash
+      run: |
+        {
+          echo "paths<<EOF"
+          if grep -q -- '--paths' scripts/install-deps.sh; then
+            bash scripts/install-deps.sh --paths
+          else
+            # Consumer's install-deps.sh predates the --paths contract: fall
+            # back to caching the whole local install prefix (legacy behaviour).
+            echo "$HOME/.local/bin"
+            echo "$HOME/.local/lib"
+          fi
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+
     - name: Restore deps cache
       id: deps-cache
       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
       with:
-        # Cache the whole local install prefix instead of naming individual
-        # tools — the consumer's scripts/install-deps.sh is the source of
-        # truth for what goes here, and the cache key already invalidates
-        # whenever that script changes. Scoped to bin + lib so unrelated
-        # XDG state under ~/.local/share or ~/.local/state stays out of
-        # the deps cache.
-        path: |
-          ~/.local/bin
-          ~/.local/lib
+        # Cache only the paths scripts/install-deps.sh declares via --paths
+        # (each tool's lib dir + bin symlink), not the whole install prefix.
+        # This keeps unrelated tooling that shares the prefix (uv, Python,
+        # other XDG state under ~/.local) out of the deps cache — that
+        # clutter already ships in the runner image, so caching it only
+        # wastes copy time. The cache key still invalidates whenever the
+        # script changes.
+        path: ${{ steps.deps-paths.outputs.paths }}
         key: deps-${{ runner.os }}-${{ hashFiles('scripts/install-deps.sh') }}
 
     - name: Install CLI dependencies
