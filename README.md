@@ -1,9 +1,9 @@
 # FIT Bootstrap
 
 Opinionated FIT environment bootstrap for GitHub Actions. Sets up Bun,
-installs and caches CLI dependencies (`just`, `apm`, `gh`), restores the
-`node_modules` + `generated` workspace cache, optionally checks out the
-wiki, and runs `./scripts/bootstrap.sh`.
+restores a single environment cache (CLI tools in `~/.local` plus
+`node_modules` and `generated`), installs anything missing, optionally
+checks out the wiki, and runs `./scripts/bootstrap.sh`.
 
 Single source of truth for the FIT CI environment. The monorepo's local
 `bootstrap` action and every FIT sibling action (e.g. `kata-agent`) call
@@ -27,13 +27,14 @@ Cold-cache runtime is ~3 minutes; warm-cache is ~15-20 seconds.
 The consumer repo must follow FIT conventions:
 
 - `scripts/install-deps.sh` — installs `just`, `apm`, `gh` into
-  `$HOME/.local`. Cache key is keyed on this file's hash.
-- `scripts/bootstrap.sh` — invoked after the environment is ready.
-  Receives `BOOTSTRAP_WORKSPACE_CACHE_HIT={true|false}` so it can skip
-  expensive setup on a warm cache.
-- `bun.lock` — workspace cache key includes its hash.
-- a `scripts/bootstrap.sh` that handles wiki init/pull (only if `token:`
-  is provided).
+  `$HOME/.local`. Supports `--paths` (prints the paths it manages, so the
+  action caches exactly those); its hash is part of the cache key.
+- `scripts/bootstrap.sh` — invoked after the environment is ready. Receives
+  `BOOTSTRAP_WORKSPACE_CACHE_HIT={true|false}` (skip install/codegen on a warm
+  cache) and `BOOTSTRAP_SKIP_SYNC=true` (the action already rebased onto
+  `origin/main`, so don't fetch+rebase again). Handles wiki init/pull when a
+  `token:` is provided.
+- `bun.lock` — its hash is part of the cache key.
 
 ## Inputs
 
@@ -46,30 +47,30 @@ The consumer repo must follow FIT conventions:
 
 ## Caching
 
-Two cache layers:
+One **environment cache** holds both the CLI tools and the workspace, so the
+critical path makes a single `actions/cache` restore:
 
-- **Deps** — `~/.local/bin` + `~/.local/lib` (the whole local install
-  prefix; the consumer's `scripts/install-deps.sh` decides what goes
-  there), keyed on `hashFiles('scripts/install-deps.sh')`. Hits
-  whenever the consumer hasn't bumped a pinned version or added a new
-  tool.
-- **Workspace** — `node_modules`, `generated`, `libraries/*/src/generated`,
-  keyed on `hashFiles('bun.lock', '**/*.proto', 'libraries/libcodegen/**')`.
-  Hits whenever the lockfile and codegen inputs haven't changed. The
-  action rebases the workspace onto `origin/main` *before* hashing, so
-  the key reflects the tree `scripts/bootstrap.sh` will actually run
-  against — a feature branch caught behind a release commit lands on
-  the same key as a fresh build of main, not a stale snapshot.
-  A `restore-keys` fallback warms `node_modules` from the most recent
-  cache on a key miss; `cache-hit` stays `'false'` in that case so the
-  consumer's `bun install` runs to reconcile.
+- **Paths** — the tool paths `scripts/install-deps.sh --paths` declares (each
+  tool's lib dir + bin symlink, which keeps unrelated `~/.local` tooling out
+  of the cache), plus `node_modules`, `generated`, and
+  `libraries/*/src/generated`.
+- **Key** — `env-v2-<os>-<hash>`, where the hash covers everything that
+  changes what gets installed or generated: `scripts/install-deps.sh`,
+  `bun.lock`, `**/*.proto`, and the `libcodegen` sources. The action rebases
+  the workspace onto `origin/main` *before* hashing, so the key reflects the
+  tree `scripts/bootstrap.sh` actually runs against — a feature branch caught
+  behind a release commit lands on the same key as a fresh build of main, not
+  a stale snapshot.
+- **Version prefix** — bump `env-vN` (v2 → v3 → …) when the cached layout
+  changes in a way the hash can't see, e.g. the move to relative generated
+  symlinks that v2 introduced.
 
-Cache misses are transparent: `scripts/install-deps.sh` re-installs
-deps, `scripts/bootstrap.sh` runs `bun install` end-to-end. Generated
-symlinks at `libraries/*/src/generated` are not in the workspace cache
-paths (symlinks don't survive `actions/cache` extraction), so
-`scripts/bootstrap.sh` always runs `just codegen` on warm cache to
-recreate them.
+A `restore-keys` fallback warms the cache from the most recent build on a key
+miss; `cache-hit` stays `'false'` there, so `scripts/bootstrap.sh` runs
+`bun install` + `just codegen` to reconcile. On a full hit it skips both —
+`generated` and its **relative** `libraries/*/src/generated` symlinks restore
+intact. (Relative links survive `actions/cache` extraction; the old absolute
+ones did not, which is why codegen used to re-run on every warm cache.)
 
 ## Wiki
 

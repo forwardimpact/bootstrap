@@ -122,15 +122,10 @@ runs:
       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
       with:
         path: ${{ steps.cache-paths.outputs.paths }}
-        # Key on every input that changes what we install or generate:
-        # install-deps.sh (tools), bun.lock (node_modules), and the proto +
-        # libcodegen sources (generated). The env-v2 prefix forces one cold
-        # rebuild so the cache is re-saved with the relative generated symlinks
-        # fit-codegen now writes — older caches held absolute, non-portable
-        # links that dangle once restored, defeating the codegen skip in
-        # scripts/bootstrap.sh. restore-keys warm-starts from the previous
-        # environment cache on a miss; cache-hit stays 'false' there, so
-        # bootstrap.sh still runs bun install + codegen to reconcile.
+        # The vN prefix is a manual cache-buster: bump it (v2 → v3 → …) when the
+        # cached layout changes in a way hashFiles can't see — e.g. the
+        # absolute→relative generated-symlink switch v2 shipped. hashFiles
+        # already invalidates on tool / lockfile / proto / codegen-source edits.
         key: env-v2-${{ runner.os }}-${{ hashFiles('scripts/install-deps.sh', 'bun.lock', '**/*.proto', 'libraries/libcodegen/src/**', 'libraries/libcodegen/templates/**', 'libraries/libcodegen/bin/**') }}
         restore-keys: |
           env-v2-${{ runner.os }}-
