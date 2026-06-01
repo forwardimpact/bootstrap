@@ -30,10 +30,10 @@ The consumer repo must follow FIT conventions:
   `$HOME/.local`. Supports `--paths` (prints the paths it manages, so the
   action caches exactly those); its hash is part of the cache key.
 - `scripts/bootstrap.sh` — invoked after the environment is ready. Receives
-  `BOOTSTRAP_WORKSPACE_CACHE_HIT={true|false}` (skip install/codegen on a warm
-  cache) and `BOOTSTRAP_SKIP_SYNC=true` (the action already rebased onto
-  `origin/main`, so don't fetch+rebase again). Handles wiki init/pull when a
-  `token:` is provided.
+  `BOOTSTRAP_WORKSPACE_CACHE_HIT={true|false}` so it can skip install/codegen
+  on a warm cache. Handles wiki init/pull when a `token:` is provided. The
+  action rebases onto `origin/main` itself (before the cache key), so this
+  script does not sync.
 - `bun.lock` — its hash is part of the cache key.
 
 ## Inputs

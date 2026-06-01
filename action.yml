@@ -54,14 +54,14 @@ runs:
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
         fi
 
-    # Rebase onto origin/main BEFORE the workspace cache key is computed.
-    # Without this, hashFiles() reads the originally-checked-out bun.lock
-    # and proto tree, but scripts/bootstrap.sh later rebases the workspace
-    # onto main — so a "cache hit" can map to a tree that no longer matches
-    # the cached node_modules (e.g. a release commit that added a new
-    # @forwardimpact/* workspace package, leaving bun install skipped and
-    # codegen unable to resolve common.proto). Doing the rebase here keys
-    # the cache off the state we'll actually run against.
+    # Rebase onto origin/main BEFORE the workspace cache key is computed, for
+    # two reasons. (1) Currency: the run executes against current main, not a
+    # stale branch point. (2) Cache correctness: the key hashes bun.lock and
+    # the proto tree, so it must reflect the post-rebase tree we actually run
+    # against — otherwise a release commit that added a new @forwardimpact/*
+    # package could land a "hit" on node_modules that predates it, skipping
+    # bun install and leaving codegen unable to resolve common.proto. This is
+    # the sole place the rebase happens; scripts/bootstrap.sh does not sync.
     - name: Sync workspace to origin/main
       shell: bash
       run: |
@@ -144,7 +144,4 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.token }}
         BOOTSTRAP_WORKSPACE_CACHE_HIT: ${{ steps.env-cache.outputs.cache-hit }}
-        # The Sync workspace step above already rebased onto origin/main; tell
-        # bootstrap.sh to skip its own redundant fetch+rebase round-trip.
-        BOOTSTRAP_SKIP_SYNC: "true"
       run: ./scripts/bootstrap.sh
