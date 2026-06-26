@@ -31,6 +31,14 @@ inputs:
     description: Bun version to install.
     required: false
     default: "1.3.11"
+  clis:
+    description: >
+      Space-separated fit-* CLIs to install as pinned, pre-compiled binaries
+      onto PATH (e.g. "fit-wiki fit-harness fit-trace"). Empty installs only
+      the external tool set. The binaries are fetched and SHA-verified by the
+      bundled fit-install.sh; an unsupported platform fails hard.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -93,26 +101,23 @@ runs:
 
     # One environment cache covers both the CLI tools and the workspace
     # (node_modules + generated). This step emits every path as one
-    # newline-separated list: the paths install-deps.sh declares via --paths
-    # (each tool's lib dir + bin symlink — keeping unrelated ~/.local tooling
-    # like uv/Python out of the cache), plus the workspace dirs. Folding the
-    # two former caches into a single restore drops an actions/cache
-    # round-trip from the critical path. Layout is static, so the tool paths
-    # are correct even on a cold cache before anything is installed.
+    # newline-separated list: the paths the bundled fit-install.sh declares via
+    # --paths (each tool's lib dir + bin symlink, plus any requested fit-*
+    # binary — keeping unrelated ~/.local tooling like uv/Python out of the
+    # cache), plus the workspace dirs. Folding the two former caches into a
+    # single restore drops an actions/cache round-trip from the critical path.
+    # Layout is static, so the tool paths are correct even on a cold cache
+    # before anything is installed. The installer is bundled in the action
+    # ($GITHUB_ACTION_PATH), so this never depends on a consumer-repo script.
     - name: Resolve cache paths
       id: cache-paths
       shell: bash
+      env:
+        CLIS: ${{ inputs.clis }}
       run: |
         {
           echo "paths<<EOF"
-          if grep -q -- '--paths' scripts/install-deps.sh; then
-            bash scripts/install-deps.sh --paths
-          else
-            # Consumer's install-deps.sh predates the --paths contract: fall
-            # back to caching the whole local install prefix (legacy behaviour).
-            echo "$HOME/.local/bin"
-            echo "$HOME/.local/lib"
-          fi
+          bash "$GITHUB_ACTION_PATH/fit-install.sh" --paths $CLIS
           printf '%s\n' node_modules generated 'libraries/*/src/generated'
           echo "EOF"
         } >> "$GITHUB_OUTPUT"
@@ -123,15 +128,18 @@ runs:
       with:
         path: ${{ steps.cache-paths.outputs.paths }}
         # The vN prefix is a manual cache-buster: bump it (v2 → v3 → …) when the
-        # cached layout changes in a way hashFiles can't see — e.g. the
-        # absolute→relative generated-symlink switch v2 shipped. hashFiles
-        # already invalidates on tool / lockfile / proto / codegen-source edits.
-        key: env-v2-${{ runner.os }}-${{ hashFiles('scripts/install-deps.sh', 'bun.lock', '**/*.proto', 'libraries/libcodegen/src/**', 'libraries/libcodegen/templates/**', 'libraries/libcodegen/bin/**') }}
+        # cached layout changes in a way hashFiles can't see — e.g. the v3 move
+        # to the action-bundled fit-install.sh (its tool versions are not on a
+        # hashFiles-visible path; bump again when they change). hashFiles still
+        # invalidates on lockfile / proto / codegen-source edits.
+        key: env-v3-${{ runner.os }}-${{ hashFiles('bun.lock', '**/*.proto', 'libraries/libcodegen/src/**', 'libraries/libcodegen/templates/**', 'libraries/libcodegen/bin/**') }}
 
     - name: Install CLI dependencies
       if: steps.env-cache.outputs.cache-hit != 'true'
       shell: bash
-      run: bash scripts/install-deps.sh
+      env:
+        CLIS: ${{ inputs.clis }}
+      run: bash "$GITHUB_ACTION_PATH/fit-install.sh" $CLIS
 
     - name: Add deps to PATH
       shell: bash

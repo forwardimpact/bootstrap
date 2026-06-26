@@ -24,11 +24,14 @@ Cold-cache runtime is ~3 minutes; warm-cache is ~15-20 seconds.
 
 ## Prerequisites
 
-The consumer repo must follow FIT conventions:
+The action **bundles its own installer** (`fit-install.sh`, synced from the
+monorepo source of truth) and runs it via `$GITHUB_ACTION_PATH`, so the
+consumer repo needs no install script of its own. The installer puts the
+pinned external tools (`apm`, `just`, `gh`, `rg`, `gitleaks`) and any
+requested `fit-*` binaries (see the `clis` input) on `PATH`.
 
-- `scripts/install-deps.sh` — installs `just`, `apm`, `gh` into
-  `$HOME/.local`. Supports `--paths` (prints the paths it manages, so the
-  action caches exactly those); its hash is part of the cache key.
+The consumer repo must still follow FIT conventions:
+
 - `scripts/bootstrap.sh` — invoked after the environment is ready. Receives
   `BOOTSTRAP_WORKSPACE_CACHE_HIT={true|false}` so it can skip install/codegen
   on a warm cache. Handles wiki init/pull when a `token:` is provided. The
@@ -44,26 +47,28 @@ The consumer repo must follow FIT conventions:
 | `app-slug`    | No       | `""`       | GitHub App slug for git identity (e.g. `kata-agent-team`).                              |
 | `app-id`      | No       | `""`       | GitHub App ID for the git identity email.                                                |
 | `bun-version` | No       | `"1.3.11"` | Bun version to install.                                                                  |
+| `clis`        | No       | `""`       | Space-separated `fit-*` CLIs to install as pinned, SHA-verified pre-compiled binaries on `PATH` (e.g. `fit-wiki fit-harness fit-trace`). Empty installs only the external tools. |
 
 ## Caching
 
 One **environment cache** holds both the CLI tools and the workspace, so the
 critical path makes a single `actions/cache` restore:
 
-- **Paths** — the tool paths `scripts/install-deps.sh --paths` declares (each
-  tool's lib dir + bin symlink, which keeps unrelated `~/.local` tooling out
-  of the cache), plus `node_modules`, `generated`, and
-  `libraries/*/src/generated`.
-- **Key** — `env-v2-<os>-<hash>`, where the hash covers everything that
-  changes what gets installed or generated: `scripts/install-deps.sh`,
-  `bun.lock`, `**/*.proto`, and the `libcodegen` sources. The action rebases
-  the workspace onto `origin/main` *before* hashing, so the key reflects the
-  tree `scripts/bootstrap.sh` actually runs against — a feature branch caught
-  behind a release commit lands on the same key as a fresh build of main, not
-  a stale snapshot.
-- **Version prefix** — bump `env-vN` (v2 → v3 → …) when the cached layout
-  changes in a way the hash can't see, e.g. the move to relative generated
-  symlinks that v2 introduced.
+- **Paths** — the tool paths the bundled `fit-install.sh --paths` declares
+  (each tool's lib dir + bin symlink, plus any requested `fit-*` binary, which
+  keeps unrelated `~/.local` tooling out of the cache), plus `node_modules`,
+  `generated`, and `libraries/*/src/generated`.
+- **Key** — `env-v3-<os>-<hash>`, where the hash covers everything on a
+  hashFiles-visible path that changes what gets generated: `bun.lock`,
+  `**/*.proto`, and the `libcodegen` sources. The action rebases the workspace
+  onto `origin/main` *before* hashing, so the key reflects the tree
+  `scripts/bootstrap.sh` actually runs against — a feature branch caught behind
+  a release commit lands on the same key as a fresh build of main, not a stale
+  snapshot.
+- **Version prefix** — bump `env-vN` (v2 → v3 → …) when the cached layout or
+  the bundled installer's tool versions change in a way the hash can't see (the
+  installer lives in the action, off any hashFiles-visible path); v3 marks the
+  move to the bundled `fit-install.sh`.
 
 The cache is **exact-key-restore-only**: there is no `restore-keys` prefix
 fallback. On an exact-key hit `cache-hit` is `'true'` and the action skips
