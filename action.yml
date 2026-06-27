@@ -121,6 +121,9 @@ runs:
           printf '%s\n' node_modules generated 'libraries/*/src/generated'
           echo "EOF"
         } >> "$GITHUB_OUTPUT"
+        # Different clis sets cache distinctly: a job's cache must never restore
+        # another job's tool set. Sanitize the clis string into the key below.
+        echo "clis_key=$(printf '%s' "$CLIS" | tr ' ' '_' | tr -cd 'a-zA-Z0-9_-')" >> "$GITHUB_OUTPUT"
 
     - name: Restore environment cache
       id: env-cache
@@ -130,9 +133,11 @@ runs:
         # The vN prefix is a manual cache-buster: bump it (v2 → v3 → …) when the
         # cached layout changes in a way hashFiles can't see — e.g. the v3 move
         # to the action-bundled fit-install.sh (its tool versions are not on a
-        # hashFiles-visible path; bump again when they change). hashFiles still
-        # invalidates on lockfile / proto / codegen-source edits.
-        key: env-v3-${{ runner.os }}-${{ hashFiles('bun.lock', '**/*.proto', 'libraries/libcodegen/src/**', 'libraries/libcodegen/templates/**', 'libraries/libcodegen/bin/**') }}
+        # hashFiles-visible path; bump again when they change). v4 adds the
+        # clis_key segment: the installer now always installs the default tools
+        # and adds the named CLIs on top, so each tool set caches separately.
+        # hashFiles still invalidates on lockfile / proto / codegen-source edits.
+        key: env-v4-${{ runner.os }}-${{ steps.cache-paths.outputs.clis_key }}-${{ hashFiles('bun.lock', '**/*.proto', 'libraries/libcodegen/src/**', 'libraries/libcodegen/templates/**', 'libraries/libcodegen/bin/**') }}
 
     - name: Install CLI dependencies
       if: steps.env-cache.outputs.cache-hit != 'true'
